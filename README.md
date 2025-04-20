@@ -18,140 +18,166 @@ npm install jspdf jspdf-autotable exceljs file-saver
 ### 3. ملف ScheduleExport.js (الكود الكامل)
 
 ```js
-iimport React, { useEffect, useState } from 'react';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
-import ExcelJS from 'exceljs';
+// ✅ المتطلبات: npm install exceljs jspdf jspdf-autotable file-saver
+
+import React from 'react';
 import { saveAs } from 'file-saver';
-import scheduleData from './test_schedule.json';
+import ExcelJS from 'exceljs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import scheduleData from './test_schedule.json'; // ← تم التعديل هنا لقراءة ملف JSON الذي رفعته
 
-const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'];
-const timeSlots = ['09:00-11:00', '11:00-13:00', '13:00-15:00', '15:00-17:00'];
+const timeSlots = [
+  '8 - 9', '9 - 10', '10 - 11', '11 - 12', '12 - 1', '1 - 2', '2 - 3', '3 - 4', '4 - 5', '5 - 6'
+];
 
-const ScheduleExport = () => {
-  const [tableData, setTableData] = useState({});
+const days = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
 
-  useEffect(() => {
-    const result = {};
-    days.forEach(day => {
-      result[day] = {};
-      timeSlots.forEach(slot => {
-        result[day][slot] = [];
+const colors = {
+  'Structure Programming': 'FF9900',
+  'Electronics': '999999',
+  'Mathematics in computer': '00B050',
+  'introduction to IT': '00B0F0',
+  'قاعة أو معمل': 'CCCCCC',
+  'default': 'FFFFFF'
+};
+
+const getColor = (courseName) => {
+  for (let key in colors) {
+    if (courseName.includes(key)) return colors[key];
+  }
+  return colors['default'];
+};
+
+const formatCellText = (session) => {
+  return `${session.course}\nد/ ${session.staff}\n${session.room}`;
+};
+
+const ScheduleExportStyled = () => {
+  const buildGrid = () => {
+    const grid = {};
+    for (let day of days) {
+      grid[day] = {};
+      for (let time of timeSlots) {
+        grid[day][time] = null;
+      }
+    }
+    scheduleData.forEach((session) => {
+      const { day, time_slot } = session;
+      grid[day][time_slot] = session;
+    });
+    return grid;
+  };
+
+  const exportExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('الجدول الدراسي');
+
+    sheet.views = [{ rightToLeft: true }];
+
+    sheet.mergeCells('A1', 'B1');
+    sheet.getCell('A1').value = 'الجدول الدراسي';
+    sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet.getRow(1).height = 30;
+
+    const headerRow = ['الفترة الزمنية', ...days];
+    sheet.addRow(headerRow);
+
+    const grid = buildGrid();
+
+    timeSlots.forEach((slot) => {
+      const row = [slot];
+      for (let day of days) {
+        const cellData = grid[day][slot];
+        if (cellData) {
+          row.push(formatCellText(cellData));
+        } else {
+          row.push('');
+        }
+      }
+      sheet.addRow(row);
+    });
+
+    sheet.columns.forEach((col, i) => {
+      col.width = i === 0 ? 12 : 30;
+    });
+
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell, colNumber) => {
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        if (rowNumber > 2 && colNumber > 1) {
+          const session = grid[days[colNumber - 2]][timeSlots[rowNumber - 3]];
+          if (session) {
+            const color = getColor(session.course);
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: color },
+            };
+            cell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' },
+            };
+          }
+        }
       });
     });
 
-    scheduleData.schedule.forEach(session => {
-      const day = session.time_slot.day.toLowerCase();
-      const start = session.time_slot.start_time;
-      const end = session.time_slot.end_time;
-      const slotKey = `${start}-${end}`;
-
-      if (result[day] && result[day][slotKey]) {
-        const course = session.course.name;
-        const teacher = session.staff.name;
-        const room = session.hall?.name || session.room?.name || '-';
-        const type = session.session_type === 'lab' ? 'معمل' : 'محاضرة';
-
-        result[day][slotKey].push(`${course} (${type})\n${teacher} - ${room}`);
-      }
-    });
-
-    setTableData(result);
-  }, []);
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), 'schedule.xlsx');
+  };
 
   const exportPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(14);
-    doc.text('الجدول الدراسي', 80, 10);
+    const doc = new jsPDF({ orientation: 'landscape' });
 
-    const head = ['اليوم', ...timeSlots];
-    const body = days.map(day => {
-      const row = [day];
-      timeSlots.forEach(slot => {
-        const cell = tableData[day]?.[slot]?.join('\n') || '';
-        row.push(cell);
-      });
+    const grid = buildGrid();
+    const body = timeSlots.map((slot) => {
+      const row = [slot];
+      for (let day of days) {
+        const cellData = grid[day][slot];
+        if (cellData) {
+          row.push(formatCellText(cellData));
+        } else {
+          row.push('');
+        }
+      }
       return row;
     });
 
-    doc.autoTable({
-      startY: 20,
-      head: [head],
-      body,
-      styles: { halign: 'center', fontSize: 8 },
-      headStyles: { fillColor: [255, 102, 0], textColor: [255, 255, 255] },
-      alternateRowStyles: { fillColor: [245, 245, 245] },
+    autoTable(doc, {
+      head: [['الفترة الزمنية', ...days]],
+      body: body,
+      styles: {
+        font: 'helvetica',
+        fontSize: 10,
+        halign: 'center',
+        valign: 'middle',
+        cellWidth: 'wrap',
+        cellPadding: 3,
+      },
+      headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+      theme: 'grid',
+      margin: { top: 20 },
     });
 
     doc.save('schedule.pdf');
   };
 
-  const exportExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Schedule');
-
-    const header = ['اليوم', ...timeSlots];
-    sheet.addRow(header);
-
-    days.forEach(day => {
-      const row = [day];
-      timeSlots.forEach(slot => {
-        row.push(tableData[day]?.[slot]?.join('\n') || '');
-      });
-      sheet.addRow(row);
-    });
-
-    sheet.columns.forEach(col => {
-      col.width = 30;
-    });
-
-    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFFF6600' }
-    };
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    saveAs(blob, 'schedule.xlsx');
-  };
-
   return (
-    <div style={{ padding: 20 }}>
-      <h2>📚 الجدول الدراسي</h2>
-      <table border="1" cellPadding="5" style={{ borderCollapse: 'collapse', width: '100%' }}>
-        <thead>
-          <tr>
-            <th>اليوم</th>
-            {timeSlots.map((slot, i) => <th key={i}>{slot}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {days.map((day, i) => (
-            <tr key={i}>
-              <td><strong>{day}</strong></td>
-              {timeSlots.map((slot, j) => (
-                <td key={j} style={{ whiteSpace: 'pre-wrap', textAlign: 'center' }}>
-                  {tableData[day]?.[slot]?.join('\n') || '-'}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={{ marginTop: 20 }}>
-        <button onClick={exportPDF}>📄 تصدير PDF</button>
-        <button onClick={exportExcel} style={{ marginLeft: 10 }}>📊 تصدير Excel</button>
+    <div className="p-4">
+      <h2 className="text-xl font-bold mb-4">جدول المستوى الأول</h2>
+      <div className="flex gap-4">
+        <button onClick={exportExcel} className="bg-green-600 text-white px-4 py-2 rounded">تصدير Excel</button>
+        <button onClick={exportPDF} className="bg-red-600 text-white px-4 py-2 rounded">تصدير PDF</button>
       </div>
     </div>
   );
 };
 
-export default ScheduleExport;
+export default ScheduleExportStyled;
+
 ```
 #####
 ### 🔁 5) استدعِ الكومبوننت في App.js
